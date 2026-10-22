@@ -2,12 +2,14 @@
 
 Bootable x86-64 kernel (freestanding C) loaded by the Limine bootloader.
 
-## Status: Milestone 3 - desktop GUI
+## Status: M4 desktop experience preview (based on the M3 kernel)
 - **Desktop shell** (runs inside the kernel until user space exists): aurora wallpaper,
   desktop icons (double-click to open), live clock from the CMOS RTC
-- **Taskbar** docked **bottom, left or right**; small icons (16 / 20 / 24 px, default 20);
-  centered start/search/app buttons at the bottom, stacked at the sides; running-app
-  indicators, minimise/restore by clicking, "show desktop" strip
+- **Boot splash and sign-in**: Aurora startup screen followed by a classic early-2010s,
+  blue-glass login panel; press Enter or click Sign in to open the desktop (demo session, no password validation)
+- **Taskbar** docked **bottom, left or right**; large icons (24 / 32 / 40 px, default 32) and a larger 24 px clock in the taller taskbar;
+  centered Start/search/few pinned app icons, running-app indicators, minimise/restore by clicking,
+  "show desktop" strip, and a translucent cyan Frutiger-Aero glass finish
 - **Start menu**: pinned app grid, live search (type, Enter launches best match),
   user bar, power button (ACPI shutdown on QEMU/Bochs/VirtualBox)
 - **Window manager**: drag by title bar, minimise, close, focus/raise, drop shadows

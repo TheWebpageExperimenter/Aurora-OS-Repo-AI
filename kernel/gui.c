@@ -1,7 +1,7 @@
 /*
  * Aurora desktop shell (runs inside the kernel until user space exists).
- *  - Desktop with icons, wallpaper, clock
- *  - Taskbar docked bottom / left / right, small icons, running-app indicators
+ *  - Aurora boot splash, classic glass login, desktop with icons and clock
+ *  - Taskbar docked bottom / left / right, medium icons, clear Aero styling and running-app indicators
  *  - Start menu with pinned apps and live search
  *  - Window manager: drag, minimise, close, focus/raise
  *  - Apps: AuroraFM, AuroraNotes, AuroraMonitor, AuroraSettings
@@ -29,6 +29,7 @@
 
 enum { APP_FILES, APP_NOTES, APP_MONITOR, APP_SETTINGS, APP_COUNT };
 enum { TB_BOTTOM, TB_LEFT, TB_RIGHT };
+enum { SCREEN_BOOT, SCREEN_LOGIN, SCREEN_DESKTOP };
 enum { LAYER_DESKTOP = -1, LAYER_OVERLAY = -2 };
 
 enum {
@@ -40,7 +41,8 @@ enum {
     ACT_DESK_BG = 0x400, ACT_DESK_ICON = 0x410,
     ACT_SET_PAGE = 0x500, ACT_SET_TBPOS = 0x510, ACT_SET_ICON = 0x520, ACT_SET_ACCENT = 0x530,
     ACT_SET_PINTB = 0x540, ACT_SET_PINST = 0x550,
-    ACT_FILES_NAV = 0x600, ACT_FILES_ROW = 0x620
+    ACT_FILES_NAV = 0x600, ACT_FILES_ROW = 0x620,
+    ACT_LOGIN_SIGNIN = 0x700
 };
 
 static const char *app_label[APP_COUNT] = { "Files", "Notes", "Monitor", "Settings" };
@@ -52,17 +54,19 @@ static const int   app_h[APP_COUNT]     = { 420, 360, 390, 470 };
 static const uint32_t accents[5] = {
     RGB(90, 220, 190), RGB(150, 122, 255), RGB(84, 154, 255), RGB(255, 192, 92), RGB(255, 112, 152)
 };
-static const int icon_sizes[3] = { 16, 20, 24 };
+static const int icon_sizes[3] = { 24, 32, 40 };
 
 static struct {
     int  tb_pos, icon, accent;
     bool pin_tb[APP_COUNT], pin_start[APP_COUNT];
-} cfg = { TB_BOTTOM, 20, 0, { true, true, true, true }, { true, true, true, true } };
+} cfg = { TB_BOTTOM, 32, 0, { true, true, false, false }, { true, true, true, true } };
 #define ACCENT (accents[cfg.accent])
 
 /* ---------- state ---------- */
 
 static int SW, SH;
+static int shell_screen = SCREEN_BOOT;
+static uint64_t screen_started;
 struct win { bool open, min; int x, y, w, h; };
 static struct win wins[APP_COUNT];
 static int zorder[APP_COUNT], zcount;
@@ -208,8 +212,9 @@ static void close_app(int a) { wins[a].open = false; wins[a].min = false; z_remo
 /* ---------- taskbar layout ---------- */
 
 static void layout_taskbar(void) {
-    tb_slot = cfg.icon + 16;
-    int thick = tb_slot + 8, gap = 2;
+    /* Large, touch-friendly targets inside a taller Aero glass taskbar. */
+    tb_slot = cfg.icon + 24;
+    int thick = tb_slot + 16, gap = 6;
     ntbi = 0;
     tbi[ntbi++] = (struct tb_item){ ACT_TB_START, -1, ICON_LOGO, 0, 0 };
     tbi[ntbi++] = (struct tb_item){ ACT_TB_SEARCH, -1, ICON_SEARCH, 0, 0 };
@@ -433,7 +438,7 @@ static void app_settings(int cx, int cy, int cw, int ch) {
         for (int i = 0; i < 3; i++) seg_btn(px + i * 94, py + 20, 88, 28, pos[i], cfg.tb_pos == i, ACT_SET_TBPOS + i);
         py += 62;
         gfx_text(px, py, "Taskbar icon size", C_DIM, FONT_S);
-        static const char *isz[3] = { "Small  16", "Medium  20", "Large  24" };
+        static const char *isz[3] = { "Small  24", "Medium  32", "Large  40" };
         for (int i = 0; i < 3; i++) seg_btn(px + i * 94, py + 20, 88, 28, isz[i], cfg.icon == icon_sizes[i], ACT_SET_ICON + i);
         py += 62;
         gfx_text(px, py, "Accent colour", C_DIM, FONT_S);
@@ -457,7 +462,7 @@ static void app_settings(int cx, int cy, int cw, int ch) {
     } else {
         icon_draw(ICON_LOGO, px, py, 40, 0);
         gfx_text(px + 56, py + 2, "Aurora OS", C_TEXT, FONT_M);
-        gfx_text(px + 56, py + 22, "Milestone 3 - version 0.3", C_DIM, FONT_S);
+        gfx_text(px + 56, py + 22, "Milestone 4 - version 0.4", C_DIM, FONT_S);
         py += 66;
         gfx_text(px, py, "A from-scratch x86-64 operating system.", C_TEXT, FONT_S); py += 20;
         gfx_text(px, py, "Kernel, drivers and desktop shell written in C.", C_DIM, FONT_S); py += 20;
@@ -533,10 +538,21 @@ static void draw_desktop(void) {
 static void draw_taskbar(void) {
     cur_layer = LAYER_OVERLAY;
     gfx_clip_reset();
-    gfx_rect(tb_x, tb_y, tb_w, tb_h, RGB(22, 24, 34), 226);
-    if (cfg.tb_pos == TB_BOTTOM) gfx_rect(tb_x, tb_y, tb_w, 1, RGB(255, 255, 255), 30);
-    else if (cfg.tb_pos == TB_LEFT) gfx_rect(tb_x + tb_w - 1, tb_y, 1, tb_h, RGB(255, 255, 255), 30);
-    else gfx_rect(tb_x, tb_y, 1, tb_h, RGB(255, 255, 255), 30);
+    /* Crystal-clear Aero glass: cool cyan tint, transparent body and specular edge. */
+    gfx_rect(tb_x, tb_y, tb_w, tb_h, RGB(22, 91, 129), 142);
+    if (cfg.tb_pos == TB_BOTTOM) {
+        gfx_rect(tb_x, tb_y, tb_w, tb_h / 2, RGB(164, 232, 246), 48);
+        gfx_rect(tb_x, tb_y, tb_w, 1, RGB(238, 253, 255), 190);
+        gfx_rect(tb_x, tb_y + tb_h - 2, tb_w, 2, RGB(7, 49, 83), 115);
+    } else if (cfg.tb_pos == TB_LEFT) {
+        gfx_rect(tb_x, tb_y, tb_w, tb_h, RGB(64, 166, 203), 36);
+        gfx_rect(tb_x + tb_w - 2, tb_y, 2, tb_h, RGB(232, 252, 255), 142);
+        gfx_rect(tb_x, tb_y, 1, tb_h, RGB(255, 255, 255), 70);
+    } else {
+        gfx_rect(tb_x, tb_y, tb_w, tb_h, RGB(64, 166, 203), 36);
+        gfx_rect(tb_x, tb_y, 2, tb_h, RGB(232, 252, 255), 142);
+        gfx_rect(tb_x + tb_w - 1, tb_y, 1, tb_h, RGB(255, 255, 255), 70);
+    }
     hit_add(tb_x, tb_y, tb_w, tb_h, ACT_TB_BG);
 
     int top = top_app();
@@ -544,13 +560,18 @@ static void draw_taskbar(void) {
         struct tb_item *it = &tbi[i];
         bool hv = ui_btn(it->x, it->y, tb_slot, tb_slot, it->id);
         bool active = (it->id == ACT_TB_START && start_open) || (it->app >= 0 && it->app == top);
-        if (active) gfx_rrect(it->x, it->y, tb_slot, tb_slot, 6, RGB(255, 255, 255), 30);
-        else if (hv) gfx_rrect(it->x, it->y, tb_slot, tb_slot, 6, RGB(255, 255, 255), 18);
+        if (active) {
+            gfx_rrect(it->x, it->y, tb_slot, tb_slot, 10, RGB(221, 250, 255), 78);
+            gfx_rrect_stroke(it->x, it->y, tb_slot, tb_slot, 10, RGB(255, 255, 255), 110);
+        } else if (hv) {
+            gfx_rrect(it->x, it->y, tb_slot, tb_slot, 10, RGB(231, 252, 255), 55);
+            gfx_rrect_stroke(it->x, it->y, tb_slot, tb_slot, 10, RGB(255, 255, 255), 75);
+        }
         icon_draw(it->icon, it->x + (tb_slot - cfg.icon) / 2, it->y + (tb_slot - cfg.icon) / 2,
-                  cfg.icon, C_TEXT);
+                  cfg.icon, active ? RGB(12, 66, 91) : C_TEXT);
         if (it->app >= 0 && wins[it->app].open) {            /* running indicator */
-            int len = active ? 14 : 6;
-            uint32_t col = active ? ACCENT : RGB(170, 178, 196);
+            int len = active ? 16 : 6;
+            uint32_t col = active ? RGB(199, 252, 255) : RGB(182, 238, 249);
             if (cfg.tb_pos == TB_BOTTOM)
                 gfx_rrect(it->x + (tb_slot - len) / 2, it->y + tb_slot, len, 3, 1, col, 255);
             else if (cfg.tb_pos == TB_LEFT)
@@ -565,18 +586,22 @@ static void draw_taskbar(void) {
     ksnprintf(t, sizeof t, "%02d:%02d", now.hour, now.minute);
     if (cfg.tb_pos == TB_BOTTOM) {
         ksnprintf(d, sizeof d, "%04d-%02d-%02d", now.year, now.month, now.day);
-        int x = SW - 6 - 76, y = tb_y + (tb_h - 26) / 2;
-        bool hv = ui_btn(x - 4, y - 4, 76, 34, ACT_TB_BG);
-        if (hv) gfx_rrect(x - 4, y - 4, 76, 34, 6, RGB(255, 255, 255), 16);
-        gfx_text(x + 30 - gfx_text_w(t, FONT_S) / 2 + 4, y, t, C_TEXT, FONT_S);
-        gfx_text(x + 4, y + 14, d, C_DIM, FONT_S);
+        /* A wider two-line tray: a prominent 24 px clock and readable date,
+           both vertically centered in the taller taskbar without clipping. */
+        const int tray_w = 150, tray_h = 50;
+        int x = SW - 12 - tray_w;
+        int y = tb_y + (tb_h - tray_h) / 2;
+        bool hv = ui_btn(x, y, tray_w, tray_h, ACT_TB_BG);
+        if (hv) gfx_rrect(x, y, tray_w, tray_h, 8, RGB(255, 255, 255), 20);
+        gfx_text(x + (tray_w - gfx_text_w(t, FONT_L)) / 2, y + 1, t, C_TEXT, FONT_L);
+        gfx_text(x + (tray_w - gfx_text_w(d, FONT_M)) / 2, y + 27, d, RGB(211, 239, 248), FONT_M);
         bool sd = ui_btn(SW - 6, tb_y, 6, tb_h, ACT_TB_SHOWDESK);
         gfx_rect(SW - 6, tb_y + 6, 1, tb_h - 12, RGB(255, 255, 255), sd ? 90 : 36);
     } else {
         ksnprintf(d, sizeof d, "%02d-%02d", now.month, now.day);
-        int y = SH - 8 - 28 - 8;
-        text_c(tb_x + tb_w / 2, y, t, C_TEXT, FONT_S);
-        text_c(tb_x + tb_w / 2, y + 14, d, C_DIM, FONT_S);
+        int y = SH - 48;
+        text_c(tb_x + tb_w / 2, y, t, C_TEXT, FONT_M);
+        text_c(tb_x + tb_w / 2, y + 18, d, RGB(211, 239, 248), FONT_S);
         bool sd = ui_btn(tb_x, SH - 6, tb_w, 6, ACT_TB_SHOWDESK);
         gfx_rect(tb_x + 6, SH - 5, tb_w - 12, 1, RGB(255, 255, 255), sd ? 90 : 36);
     }
@@ -668,11 +693,101 @@ static void draw_start_menu(void) {
 }
 
 /* ======================================================================
+ *  Boot splash and classic 2010s-inspired login screen
+ * ====================================================================== */
+
+static void draw_boot_screen(uint64_t elapsed) {
+    gfx_clip_reset();
+    gfx_frame_begin();
+    gfx_rect(0, 0, SW, SH, RGB(3, 17, 43), 188);
+    /* Soft glassy bands suggest an aurora without needing image assets. */
+    gfx_rrect(SW / 8, SH / 5, SW * 3 / 4, 2, 1, RGB(132, 236, 248), 55);
+    gfx_rrect(SW / 5, SH * 4 / 5, SW * 3 / 5, 1, 0, RGB(112, 229, 223), 48);
+
+    int cx = SW / 2, cy = SH / 2;
+    gfx_circle16(cx * 16, (cy - 60) * 16, 45 * 16, RGB(48, 206, 225), 38);
+    gfx_circle16(cx * 16, (cy - 60) * 16, 35 * 16, RGB(29, 107, 154), 210);
+    gfx_ring16(cx * 16, (cy - 60) * 16, 38 * 16, 2 * 16, RGB(202, 250, 255), 190, false);
+    icon_draw(ICON_LOGO, cx - 23, cy - 83, 46, RGB(235, 253, 255));
+    text_c(cx, cy - 4, "AURORA OS", RGB(241, 252, 255), FONT_L);
+    text_c(cx, cy + 25, "A new horizon for your desktop", RGB(164, 211, 228), FONT_S);
+
+    int bw = imin(300, SW - 80), bx = (SW - bw) / 2, by = cy + 83;
+    gfx_rrect(bx, by, bw, 7, 4, RGB(8, 45, 76), 220);
+    int progress = (int)(elapsed * 100 / 1700);
+    if (progress > 94) progress = 94;
+    if (progress < 3) progress = 3;
+    int fill = (bw - 4) * progress / 100;
+    gfx_rrect(bx + 2, by + 2, fill, 3, 2, RGB(121, 235, 245), 255);
+    text_c(cx, by + 22, "Starting Aurora...", RGB(151, 197, 216), FONT_S);
+}
+
+static void draw_login_screen(void) {
+    cur_layer = LAYER_OVERLAY;
+    gfx_clip_reset();
+    gfx_frame_begin();
+    gfx_rect(0, 0, SW, SH, RGB(5, 26, 59), 146);
+    gfx_rect(0, 0, SW, SH / 3, RGB(65, 159, 211), 28);
+    gfx_rrect(SW / 10, SH / 7, SW * 4 / 5, 2, 1, RGB(218, 249, 255), 38);
+
+    int pw = imin(480, SW - 40);
+    int ph = imin(470, SH - 48);
+    if (pw < 260) pw = SW - 16;
+    if (ph < 330) ph = SH - 24;
+    int px = (SW - pw) / 2, py = (SH - ph) / 2;
+    int cx = SW / 2;
+
+    /* Dark blue glass and silver-blue bevel evoke Windows 7 / early-2010s login. */
+    gfx_shadow(px, py, pw, ph, 18);
+    gfx_rrect(px, py, pw, ph, 18, RGB(13, 40, 72), 196);
+    gfx_rrect(px + 2, py + 2, pw - 4, ph - 4, 16, RGB(70, 145, 185), 46);
+    gfx_rrect_stroke(px, py, pw, ph, 18, RGB(207, 243, 255), 105);
+    gfx_rrect(px + 9, py + 8, pw - 18, 4, 2, RGB(215, 250, 255), 122);
+
+    int ay = py + 76;
+    gfx_circle16(cx * 16, ay * 16, 43 * 16, RGB(170, 232, 246), 35);
+    gfx_circle16(cx * 16, ay * 16, 35 * 16, RGB(171, 220, 238), 255);
+    gfx_circle16(cx * 16, ay * 16, 31 * 16, RGB(37, 91, 130), 255);
+    gfx_ring16(cx * 16, ay * 16, 35 * 16, 2 * 16, RGB(237, 251, 255), 220, false);
+    text_c(cx, ay - 13, "A", RGB(247, 254, 255), FONT_L);
+    text_c(cx, ay + 48, "Aurora User", RGB(248, 252, 255), FONT_L);
+    text_c(cx, ay + 78, "Welcome back", RGB(179, 218, 237), FONT_S);
+
+    int fw = imin(300, pw - 44), fx = cx - fw / 2, fy = py + 235;
+    gfx_rrect(fx, fy, fw, 42, 5, RGB(7, 26, 49), 220);
+    gfx_rrect_stroke(fx, fy, fw, 42, 5, RGB(162, 220, 241), 175);
+    gfx_text(fx + 15, fy + 14, "Password", RGB(142, 179, 199), FONT_S);
+    gfx_rrect(fx + fw - 39, fy + 5, 31, 32, 4, RGB(89, 170, 205), 220);
+    icon_draw(ICON_CHEV_R, fx + fw - 32, fy + 11, 19, RGB(250, 254, 255));
+
+    int bw = 132, bh = 38, bx = cx - bw / 2, by = fy + 54;
+    bool hov_signin = ui_btn(bx, by, bw, bh, ACT_LOGIN_SIGNIN);
+    gfx_rrect_grad(bx, by, bw, bh, 6,
+                   hov_signin ? RGB(203, 250, 255) : RGB(154, 225, 242),
+                   hov_signin ? RGB(104, 205, 234) : RGB(66, 161, 207));
+    gfx_rrect_stroke(bx, by, bw, bh, 6, RGB(239, 254, 255), 180);
+    text_c(cx, by + 11, "Sign in", RGB(8, 43, 66), FONT_M);
+    text_c(cx, by + 106, "Press Enter or click Sign in", RGB(181, 218, 233), FONT_S);
+
+    gfx_text(22, SH - 30, "AURORA OS", RGB(226, 247, 255), FONT_S);
+    int rightw = gfx_text_w("PERSONAL SESSION", FONT_S);
+    gfx_text(SW - rightw - 22, SH - 30, "PERSONAL SESSION", RGB(157, 202, 224), FONT_S);
+}
+
+/* ======================================================================
  *  Compose a frame
  * ====================================================================== */
 
 static void compose(void) {
     nhits = 0;
+    if (shell_screen == SCREEN_BOOT) {
+        draw_boot_screen(uptime_ms() - screen_started);
+        return;
+    }
+    if (shell_screen == SCREEN_LOGIN) {
+        draw_login_screen();
+        return;
+    }
     layout_taskbar();
     int sx, sy, sw, sh;
     start_geom(&sx, &sy, &sw, &sh);
@@ -759,6 +874,14 @@ static void do_action(int id, int mx, int my) {
 
 static void on_mouse_down(int mx, int my) {
     int id = hit_find(mx, my);
+    if (shell_screen == SCREEN_LOGIN) {
+        if (id == ACT_LOGIN_SIGNIN) {
+            shell_screen = SCREEN_DESKTOP;
+            dirty = true;
+        }
+        return;
+    }
+    if (shell_screen != SCREEN_DESKTOP) return;
     bool in_start = (id >= ACT_SM_APP && id <= ACT_SM_BODY) || id == ACT_TB_START || id == ACT_TB_SEARCH;
     if (start_open && !in_start) close_start();
     do_action(id, mx, my);
@@ -787,6 +910,14 @@ static void handle_mouse(void) {
 }
 
 static void handle_key(int k) {
+    if (shell_screen == SCREEN_BOOT) return;
+    if (shell_screen == SCREEN_LOGIN) {
+        if (k == '\n' || k == ' ') {
+            shell_screen = SCREEN_DESKTOP;
+            dirty = true;
+        }
+        return;
+    }
     if (k == KEY_SUPER) { toggle_start(false); return; }
     if (start_open) {
         if (k == 27) close_start();
@@ -810,9 +941,12 @@ void gui_run(struct limine_framebuffer *f) {
     ps2_init(SW, SH);
     rtc_read(&now);
     notes_len = 0;
+    shell_screen = SCREEN_BOOT;
+    screen_started = uptime_ms();
 
     int cur_x = -1000, cur_y = -1000;
     uint64_t last_sec = uptime_ms() / 1000, last_blink = uptime_ms() / 500;
+    uint64_t last_boot_frame = uptime_ms() / 50;
 
     for (;;) {
         bool got = ps2_poll();
@@ -821,6 +955,16 @@ void gui_run(struct limine_framebuffer *f) {
         while ((k = ps2_getkey())) { handle_key(k); dirty = true; }
 
         uint64_t ms = uptime_ms();
+        if (shell_screen == SCREEN_BOOT) {
+            if (ms - screen_started >= 1800) {
+                shell_screen = SCREEN_LOGIN;
+                screen_started = ms;
+                dirty = true;
+            } else if (ms / 50 != last_boot_frame) {
+                last_boot_frame = ms / 50;
+                dirty = true;
+            }
+        }
         if (ms / 500 != last_blink) {
             last_blink = ms / 500; blink_on = last_blink & 1;
             if (start_open || top_app() == APP_NOTES) dirty = true;
@@ -839,11 +983,11 @@ void gui_run(struct limine_framebuffer *f) {
             dirty = false;
             compose();
             gfx_present();
-            gfx_draw_cursor(mouse_x, mouse_y);
+            if (shell_screen != SCREEN_BOOT) gfx_draw_cursor(mouse_x, mouse_y);
             cur_x = mouse_x; cur_y = mouse_y;
         } else if (mouse_x != cur_x || mouse_y != cur_y) {
             gfx_restore(cur_x, cur_y, CURSOR_W, CURSOR_H);
-            gfx_draw_cursor(mouse_x, mouse_y);
+            if (shell_screen != SCREEN_BOOT) gfx_draw_cursor(mouse_x, mouse_y);
             cur_x = mouse_x; cur_y = mouse_y;
         }
         if (!got) __asm__ volatile ("pause");

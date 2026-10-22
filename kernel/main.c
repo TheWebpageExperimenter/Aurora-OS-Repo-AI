@@ -97,7 +97,7 @@ void kmain(void) {
         console_init(framebuffer_request.response->framebuffers[0]);
 
     console_set_colors(console_rgb(110, 130, 255), console_rgb(14, 18, 34));
-    kprintf("Aurora OS  -  milestone 3\n");
+    kprintf("Aurora OS  -  milestone 4 desktop preview\n");
     console_set_colors(console_rgb(210, 220, 230), console_rgb(14, 18, 34));
     kprintf("-------------------------\n\n");
 
