@@ -1,4 +1,6 @@
-# Aurora M4 desktop preview
+# Aurora M4 baseline (historical)
+
+This document records the earlier M4/M4 desktop milestone. For the current release, see `M4.5-CHANGES.md` and `README.md`.
 
 M4 refreshes the user-facing startup and desktop shell while keeping the existing freestanding M3 kernel architecture.
 
